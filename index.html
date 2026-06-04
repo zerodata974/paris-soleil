@@ -1,6 +1,8 @@
 bash
 
-cat > /mnt/user-data/outputs/index.html << 'HTMLEOF'
+cat /mnt/user-data/outputs/index.html
+Sortie
+
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -269,19 +271,20 @@ function updateSunLight(sun) {
   const isDay = sun.altitude > 1;
 
   // Direction lumière solaire réelle
-  map.setLight({
-    anchor: 'map',
-    color: isDay ? '#fff5e0' : '#1a2040',
-    intensity: isDay ? Math.max(0.2, Math.min(1, sun.altitude / 50)) : 0.05,
-    position: [1.5, sun.azimuth, Math.max(1, 90 - sun.altitude)],
-  });
+  try {
+    map.setLight({
+      anchor: 'map',
+      color: isDay ? '#fff5e0' : '#1a2040',
+      intensity: isDay ? Math.max(0.2, Math.min(1, sun.altitude / 50)) : 0.05,
+      position: [1.5, sun.azimuth, Math.max(1, 90 - sun.altitude)],
+    });
+  } catch(e) {}
 
   // Ombres portées natives Mapbox sur les bâtiments
   if (map.getLayer('3d-buildings')) {
     map.setPaintProperty('3d-buildings', 'fill-extrusion-opacity',
       isDay ? 0.85 : 0.95
     );
-    // Couleur face éclairée vs face dans l'ombre
     const baseShade = isDay ? Math.round(35 + (sun.altitude / 60) * 30) : 20;
     map.setPaintProperty('3d-buildings', 'fill-extrusion-color', [
       'interpolate', ['linear'], ['get', 'height'],
@@ -390,7 +393,7 @@ async function loadTerraces() {
     way["amenity"~"^(bar|cafe|pub|restaurant|biergarten)$"](48.80,2.25,48.92,2.47);
   );out center 2000;`;
   try {
-    const res = await fetch('https://overpass-api.de/api/interpreter', {
+    const res = await fetch('https://overpass.kumi.systems/api/interpreter', {
       method: 'POST', body: 'data=' + encodeURIComponent(query)
     });
     const data = await res.json();
@@ -617,8 +620,3 @@ setInterval(() => { if (isNowMode) initMode(); }, 60000);
 </script>
 </body>
 </html>
-HTMLEOF
-echo "OK"
-Sortie
-
-OK
