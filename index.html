@@ -629,6 +629,9 @@ document.getElementById('editClose').addEventListener('click', () => {
   document.getElementById('editBtn').classList.remove('active');
   document.getElementById('edit-banner').style.display = 'none';
   if (dragMarker) { dragMarker.remove(); dragMarker = null; }
+  map.dragPan.enable();
+  map.scrollZoom.enable();
+  if (validateBtn) { validateBtn.remove(); validateBtn = null; }
 });
 
 // Bouton corriger dans la fiche
@@ -674,11 +677,20 @@ document.getElementById('fixBtn').addEventListener('click', () => {
     .setLngLat([t.lon, t.lat])
     .addTo(map);
 
+  // Désactive le drag de la carte pendant l'édition
+  map.dragPan.disable();
+  map.scrollZoom.disable();
+
   // Zoom sur la terrasse
   map.flyTo({ center: [t.lon, t.lat], zoom: 18, duration: 800 });
 
   // Bouton valider qui apparaît
   showValidateBtn(t);
+
+  dragMarker.on('drag', () => {
+    const pos = dragMarker.getLngLat();
+    showValidateBtn(t, pos.lat, pos.lng);
+  });
 
   dragMarker.on('dragend', () => {
     const pos = dragMarker.getLngLat();
@@ -711,6 +723,9 @@ function showValidateBtn(t, lat, lon) {
     t.lon = pos.lng;
     // Update carte
     updateTerraceLayer(getSun(currentHour));
+    // Réactive le drag de la carte
+    map.dragPan.enable();
+    map.scrollZoom.enable();
     // Nettoyage
     if (dragMarker) { dragMarker.remove(); dragMarker = null; }
     validateBtn.remove(); validateBtn = null;
