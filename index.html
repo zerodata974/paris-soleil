@@ -1,0 +1,549 @@
+bash
+
+cat /mnt/user-data/outputs/index.html
+Sortie
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Paris Soleil — Terrasses ensoleillées en temps réel</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/suncalc@1.9.0/suncalc.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --accent: #f5a623;
+  --ui-bg: rgba(10,12,18,0.93);
+  --ui-border: rgba(255,255,255,0.08);
+  --ui-text: #f0ede8;
+  --ui-muted: rgba(240,237,232,0.5);
+  --radius: 12px;
+}
+body { font-family: 'DM Sans', sans-serif; background: #0a0c12; color: var(--ui-text); overflow: hidden; height: 100vh; width: 100vw; }
+#map { position: absolute; inset: 0; }
+
+/* Panel */
+#panel {
+  position: absolute; top: 16px; left: 16px; width: 300px;
+  background: var(--ui-bg); border: 0.5px solid var(--ui-border);
+  border-radius: var(--radius); backdrop-filter: blur(20px);
+  z-index: 10; box-shadow: 0 8px 40px rgba(0,0,0,0.5); overflow: hidden;
+}
+#panel-header { padding: 14px 16px 10px; border-bottom: 0.5px solid var(--ui-border); }
+.app-title { font-size: 17px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.sun-dot { width: 20px; height: 20px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 10px rgba(245,166,35,0.7); flex-shrink: 0; }
+.app-sub { font-size: 11px; color: var(--ui-muted); margin-top: 2px; }
+#panel-body { padding: 12px 16px; }
+
+.lbl { font-size: 10px; font-weight: 500; letter-spacing: 0.8px; text-transform: uppercase; color: var(--ui-muted); margin-bottom: 6px; }
+.time-big { font-family: 'DM Mono', monospace; font-size: 34px; color: var(--accent); letter-spacing: -1px; line-height: 1; margin-bottom: 4px; }
+.time-date { font-size: 11px; color: var(--ui-muted); margin-bottom: 10px; }
+
+input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 3px; background: rgba(255,255,255,0.1); border-radius: 2px; outline: none; cursor: pointer; margin-bottom: 4px; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 8px rgba(245,166,35,0.5); }
+input[type=range]:disabled { opacity: 0.4; cursor: default; }
+.ticks { display: flex; justify-content: space-between; font-size: 10px; color: var(--ui-muted); font-family: 'DM Mono', monospace; margin-bottom: 10px; }
+
+.mode-row { display: flex; gap: 6px; margin-bottom: 10px; }
+.mode-btn { flex: 1; padding: 6px 0; font-size: 12px; font-family: 'DM Sans', sans-serif; font-weight: 500; border: 0.5px solid rgba(255,255,255,0.12); border-radius: 8px; background: transparent; color: var(--ui-muted); cursor: pointer; transition: all 0.15s; }
+.mode-btn.active { background: var(--accent); color: #1a0e00; border-color: transparent; font-weight: 600; }
+
+.sun-info { display: flex; justify-content: space-between; background: rgba(245,166,35,0.07); border: 0.5px solid rgba(245,166,35,0.2); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; font-size: 12px; }
+.sun-info div span { display: block; font-size: 10px; color: var(--ui-muted); margin-bottom: 1px; }
+
+.stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+.stat { background: rgba(255,255,255,0.04); border: 0.5px solid var(--ui-border); border-radius: 8px; padding: 8px 10px; }
+.stat-n { font-size: 20px; font-weight: 600; font-family: 'DM Mono', monospace; }
+.stat-n.s { color: var(--accent); }
+.stat-l { font-size: 11px; color: var(--ui-muted); margin-top: 1px; }
+
+.play-btn { width: 100%; padding: 8px; border: 0.5px solid rgba(255,255,255,0.12); border-radius: 8px; background: rgba(255,255,255,0.04); color: var(--ui-text); font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.15s; }
+.play-btn:hover { background: rgba(255,255,255,0.08); }
+.play-btn.playing { border-color: var(--accent); color: var(--accent); }
+
+/* Fiche bar */
+#bar-panel {
+  position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+  background: var(--ui-bg); border: 0.5px solid var(--ui-border);
+  border-radius: var(--radius); backdrop-filter: blur(20px);
+  padding: 12px 16px; min-width: 260px; max-width: 360px;
+  z-index: 10; display: none; box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+}
+.bar-name { font-size: 15px; font-weight: 600; margin-bottom: 3px; }
+.bar-addr { font-size: 11px; color: var(--ui-muted); margin-bottom: 8px; }
+.bar-status { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+.bar-status.sun { background: rgba(245,166,35,0.15); color: var(--accent); border: 0.5px solid rgba(245,166,35,0.3); }
+.bar-status.shade { background: rgba(255,255,255,0.06); color: var(--ui-muted); border: 0.5px solid var(--ui-border); }
+.bar-close { position: absolute; top: 10px; right: 12px; background: none; border: none; color: var(--ui-muted); cursor: pointer; font-size: 18px; padding: 2px 5px; }
+
+/* Légende */
+#legend { position: absolute; bottom: 20px; right: 16px; background: var(--ui-bg); border: 0.5px solid var(--ui-border); border-radius: 8px; padding: 8px 12px; font-size: 12px; z-index: 10; backdrop-filter: blur(20px); }
+.leg { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; color: var(--ui-text); }
+.leg:last-child { margin-bottom: 0; }
+.leg-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+/* Marqueurs fixes */
+.t-marker { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.5); cursor: pointer; transition: background 0.4s, box-shadow 0.4s; }
+.t-marker.sun { background: #f5a623; box-shadow: 0 0 10px rgba(245,166,35,0.8); }
+.t-marker.shade { background: #37474f; box-shadow: none; border-color: rgba(255,255,255,0.15); }
+
+.maplibregl-ctrl-bottom-right { bottom: 65px !important; }
+</style>
+</head>
+<body>
+
+<script>
+  const MAPTILER_KEY = '7GRrlO3Ow0nsZS4v0n3a';
+</script>
+
+<div id="map"></div>
+
+<div id="panel">
+  <div id="panel-header">
+    <div class="app-title"><div class="sun-dot"></div>Paris Soleil</div>
+    <div class="app-sub">Terrasses ensoleillées en temps réel</div>
+  </div>
+  <div id="panel-body">
+    <div class="lbl">Heure</div>
+    <div class="time-big" id="timeDisplay">14:00</div>
+    <div class="time-date" id="dateDisplay">Aujourd'hui</div>
+    <input type="range" id="slider" min="5" max="22" step="0.25" value="14">
+    <div class="ticks"><span>5h</span><span>8h</span><span>11h</span><span>14h</span><span>17h</span><span>20h</span></div>
+    <div class="mode-row">
+      <button class="mode-btn active" id="btnNow">Maintenant</button>
+      <button class="mode-btn" id="btnManual">Manuel</button>
+    </div>
+    <div class="sun-info">
+      <div><span>Azimut</span><strong id="sunAz">—</strong></div>
+      <div><span>Élévation</span><strong id="sunEl">—</strong></div>
+      <div><span>Coucher</span><strong id="sunSet">—</strong></div>
+    </div>
+    <div class="stats-row">
+      <div class="stat"><div class="stat-n s" id="statSun">—</div><div class="stat-l">Au soleil</div></div>
+      <div class="stat"><div class="stat-n" id="statShade">—</div><div class="stat-l">À l'ombre</div></div>
+    </div>
+    <button class="play-btn" id="playBtn">▶ Simuler la journée</button>
+  </div>
+</div>
+
+<div id="bar-panel">
+  <button class="bar-close" id="barClose">×</button>
+  <div class="bar-name" id="barName">—</div>
+  <div class="bar-addr" id="barAddr">—</div>
+  <div id="barStatus" class="bar-status sun">☀ Terrasse ensoleillée</div>
+</div>
+
+<div id="legend">
+  <div class="leg"><div class="leg-dot" style="background:#f5a623;box-shadow:0 0 6px rgba(245,166,35,0.6)"></div>Terrasse ensoleillée</div>
+  <div class="leg"><div class="leg-dot" style="background:#546e7a"></div>Terrasse à l'ombre</div>
+  <div class="leg"><div class="leg-dot" style="background:rgba(245,166,35,0.25);border:1px solid rgba(245,166,35,0.4)"></div>Zone ensoleillée</div>
+</div>
+
+<script>
+// ════════════════════════════════════
+// CARTE
+// ════════════════════════════════════
+const map = new maplibregl.Map({
+  container: 'map',
+  style: `https://api.maptiler.com/maps/dataviz-dark/style.json?key=${MAPTILER_KEY}`,
+  center: [2.3488, 48.8534],
+  zoom: 15,
+  pitch: 50,
+  bearing: -10,
+  antialias: true,
+});
+map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
+map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true } }), 'bottom-right');
+
+// ════════════════════════════════════
+// ÉTAT
+// ════════════════════════════════════
+let currentHour = 14;
+let isNowMode = true;
+let isPlaying = false;
+let playTimer = null;
+let terraces = [];
+let markers = []; // { marker, el, data }
+let mapReady = false;
+
+// ════════════════════════════════════
+// SOLEIL
+// ════════════════════════════════════
+function getSun(hour) {
+  const d = new Date();
+  d.setHours(Math.floor(hour), Math.round((hour % 1) * 60), 0, 0);
+  const pos = SunCalc.getPosition(d, 48.8566, 2.3488);
+  const times = SunCalc.getTimes(d, 48.8566, 2.3488);
+  return {
+    altitude: pos.altitude * 180 / Math.PI,
+    azimuth: (pos.azimuth * 180 / Math.PI + 180) % 360,
+    sunset: times.sunset,
+  };
+}
+
+// ════════════════════════════════════
+// CALCUL D'OMBRE PAR RAYCASTING
+// Projette un rayon depuis chaque terrasse
+// vers le soleil et vérifie si un bâtiment coupe
+// ════════════════════════════════════
+function isTerraceInShadow(lat, lon, sun) {
+  if (sun.altitude <= 1) return true;
+
+  // Longueur du rayon à projeter (en degrés lat/lon ~200m)
+  const RAY_LEN = 0.003;
+  const azRad = sun.azimuth * Math.PI / 180;
+  // Direction VERS le soleil (inverse de l'azimut)
+  const dx = Math.sin(azRad) * RAY_LEN;
+  const dy = Math.cos(azRad) * RAY_LEN;
+
+  // Récupère les bâtiments visibles sur la carte
+  if (!mapReady) return false;
+  try {
+    const features = map.queryRenderedFeatures(
+      map.project([lon + dx/2, lat + dy/2]),
+      { layers: ['3d-buildings'] }
+    );
+    if (!features || features.length === 0) return false;
+
+    // Vérifie si un bâtiment entre la terrasse et le soleil est assez haut
+    for (const f of features) {
+      const h = f.properties?.render_height || f.properties?.height || 0;
+      if (h < 5) continue;
+      // Plus le soleil est haut, moins les bâtiments proches font de l'ombre
+      const minHeight = sun.altitude * 0.8;
+      if (h > minHeight) return true;
+    }
+  } catch(e) {}
+  return false;
+}
+
+// ════════════════════════════════════
+// COUCHE OMBRES SUR LA CARTE
+// Grille de points colorés selon ensoleillement
+// ════════════════════════════════════
+function buildShadowGrid(sun) {
+  if (!mapReady) return;
+
+  const bounds = map.getBounds();
+  const minLng = bounds.getWest(), maxLng = bounds.getEast();
+  const minLat = bounds.getSouth(), maxLat = bounds.getNorth();
+  const steps = 30;
+  const dlng = (maxLng - minLng) / steps;
+  const dlat = (maxLat - minLat) / steps;
+
+  const sunFeatures = [];
+  const shadeFeatures = [];
+
+  if (sun.altitude > 1) {
+    const azRad = sun.azimuth * Math.PI / 180;
+    const RAY = 0.0015;
+    const dx = Math.sin(azRad) * RAY;
+    const dy = Math.cos(azRad) * RAY;
+
+    for (let i = 0; i <= steps; i++) {
+      for (let j = 0; j <= steps; j++) {
+        const lng = minLng + i * dlng;
+        const lat = minLat + j * dlat;
+        let inShade = false;
+        try {
+          const pt = map.project([lng + dx, lat + dy]);
+          const fs = map.queryRenderedFeatures(pt, { layers: ['3d-buildings'] });
+          if (fs && fs.length > 0) {
+            const h = fs[0].properties?.render_height || fs[0].properties?.height || 0;
+            if (h > sun.altitude * 0.7) inShade = true;
+          }
+        } catch(e) {}
+
+        if (!inShade) {
+          sunFeatures.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [lng, lat] }, properties: {} });
+        }
+      }
+    }
+  }
+
+  const src = map.getSource('shadow-grid');
+  if (src) {
+    src.setData({ type: 'FeatureCollection', features: sunFeatures });
+  }
+}
+
+// ════════════════════════════════════
+// UPDATE LUMIÈRE & OMBRES
+// ════════════════════════════════════
+function updateScene(hour) {
+  const sun = getSun(hour);
+
+  document.getElementById('sunAz').textContent = Math.round(sun.azimuth) + '°';
+  document.getElementById('sunEl').textContent = Math.round(Math.max(0, sun.altitude)) + '°';
+  const ss = sun.sunset;
+  document.getElementById('sunSet').textContent = ss ? `${ss.getHours()}h${String(ss.getMinutes()).padStart(2,'0')}` : '—';
+
+  const isDay = sun.altitude > 1;
+
+  // Lumière directionnelle sur les bâtiments
+  if (mapReady && map.getLayer('3d-buildings')) {
+    try {
+      map.setLight({
+        anchor: 'map',
+        color: isDay ? '#fff5e0' : '#1a2040',
+        intensity: isDay ? Math.max(0.15, Math.min(0.95, sun.altitude / 55)) : 0.05,
+        position: [1.5, sun.azimuth, Math.max(1, 90 - sun.altitude)],
+      });
+    } catch(e) {}
+
+    // Couleur des bâtiments selon heure
+    const shade = isDay ? Math.round(30 + (sun.altitude / 60) * 25) : 20;
+    try {
+      map.setPaintProperty('3d-buildings', 'fill-extrusion-color', [
+        'interpolate', ['linear'], ['get', 'render_height'],
+        0, `rgb(${shade},${shade+8},${shade+18})`,
+        20, `rgb(${shade+12},${shade+18},${shade+30})`,
+        50, `rgb(${shade+22},${shade+28},${shade+45})`,
+      ]);
+    } catch(e) {}
+  }
+
+  // Grille d'ensoleillement
+  buildShadowGrid(sun);
+
+  // Marqueurs terrasses
+  updateMarkers(sun);
+}
+
+// ════════════════════════════════════
+// MARQUEURS — fixes sur la carte
+// ════════════════════════════════════
+function updateMarkers(sun) {
+  let sunlit = 0;
+  markers.forEach(({ el, data }) => {
+    const inShade = isTerraceInShadow(data.lat, data.lon, sun);
+    data._inShade = inShade;
+    if (!inShade) {
+      sunlit++;
+      el.className = 't-marker sun';
+    } else {
+      el.className = 't-marker shade';
+    }
+  });
+  document.getElementById('statSun').textContent = sunlit;
+  document.getElementById('statShade').textContent = markers.length - sunlit;
+}
+
+function addMarkers() {
+  // Supprimer anciens marqueurs
+  markers.forEach(({ marker }) => marker.remove());
+  markers = [];
+
+  terraces.forEach(t => {
+    const el = document.createElement('div');
+    el.className = 't-marker shade';
+
+    const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+      .setLngLat([t.lon, t.lat])
+      .addTo(map);
+
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showBar(t);
+    });
+
+    markers.push({ marker, el, data: t });
+  });
+
+  updateMarkers(getSun(currentHour));
+}
+
+// ════════════════════════════════════
+// CHARGEMENT TERRASSES OSM
+// ════════════════════════════════════
+async function loadTerraces() {
+  const query = `[out:json][timeout:25];(
+    node["amenity"~"bar|cafe|pub|restaurant"]["outdoor_seating"="yes"](48.83,2.29,48.89,2.42);
+    way["amenity"~"bar|cafe|pub|restaurant"]["outdoor_seating"="yes"](48.83,2.29,48.89,2.42);
+  );out center 200;`;
+  try {
+    const res = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST', body: 'data=' + encodeURIComponent(query)
+    });
+    const data = await res.json();
+    terraces = data.elements.map(el => ({
+      id: el.id,
+      name: el.tags?.name || 'Bar / Café',
+      lat: el.lat ?? el.center?.lat,
+      lon: el.lon ?? el.center?.lon,
+      addr: [el.tags?.['addr:housenumber'], el.tags?.['addr:street']].filter(Boolean).join(' ') || 'Paris',
+    })).filter(t => t.lat && t.lon);
+    addMarkers();
+  } catch(e) {
+    useDemoData();
+  }
+}
+
+function useDemoData() {
+  terraces = [
+    { id:1, name:'Le Fumoir', lat:48.8602, lon:2.3371, addr:'6 Rue de l\'Amiral de Coligny' },
+    { id:2, name:'Café Beaubourg', lat:48.8606, lon:2.3518, addr:'43 Rue Saint-Merri' },
+    { id:3, name:'Café de Flore', lat:48.8540, lon:2.3330, addr:'172 Bd Saint-Germain' },
+    { id:4, name:'Les Deux Magots', lat:48.8539, lon:2.3334, addr:'6 Pl. Saint-Germain des Prés' },
+    { id:5, name:'Chez Janou', lat:48.8562, lon:2.3611, addr:'2 Rue Roger Verlomme' },
+    { id:6, name:'Le Progrès', lat:48.8652, lon:2.3503, addr:'7 Rue de Bretagne' },
+    { id:7, name:'Café de la Paix', lat:48.8718, lon:2.3314, addr:'5 Pl. de l\'Opéra' },
+    { id:8, name:'Brasserie Lipp', lat:48.8540, lon:2.3325, addr:'151 Bd Saint-Germain' },
+    { id:9, name:'Le Nemours', lat:48.8641, lon:2.3366, addr:'2 Pl. Colette' },
+    { id:10, name:'La Palette', lat:48.8534, lon:2.3380, addr:'43 Rue de Seine' },
+    { id:11, name:'Café Charlot', lat:48.8625, lon:2.3599, addr:'38 Rue de Bretagne' },
+    { id:12, name:'Le Baron Rouge', lat:48.8493, lon:2.3745, addr:'1 Rue Théophile Roussel' },
+  ];
+  addMarkers();
+}
+
+// ════════════════════════════════════
+// INIT CARTE
+// ════════════════════════════════════
+map.on('load', () => {
+  mapReady = true;
+
+  // Bâtiments 3D
+  const layers = map.getStyle().layers;
+  let labelLayerId;
+  for (const l of layers) {
+    if (l.type === 'symbol' && l.layout?.['text-field']) { labelLayerId = l.id; break; }
+  }
+
+  map.addSource('openmaptiles', {
+    type: 'vector',
+    url: `https://api.maptiler.com/tiles/v3/tiles.json?key=${MAPTILER_KEY}`,
+  });
+
+  map.addLayer({
+    id: '3d-buildings',
+    source: 'openmaptiles',
+    'source-layer': 'building',
+    type: 'fill-extrusion',
+    minzoom: 13,
+    paint: {
+      'fill-extrusion-color': ['interpolate', ['linear'], ['get', 'render_height'], 0, '#1e2530', 20, '#2a3342', 50, '#354055'],
+      'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 10],
+      'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
+      'fill-extrusion-opacity': 0.9,
+    },
+  }, labelLayerId);
+
+  // Couche zones ensoleillées
+  map.addSource('shadow-grid', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] }
+  });
+  map.addLayer({
+    id: 'sun-zones',
+    type: 'circle',
+    source: 'shadow-grid',
+    paint: {
+      'circle-radius': 18,
+      'circle-color': 'rgba(245, 200, 50, 0.12)',
+      'circle-blur': 1,
+    }
+  }, '3d-buildings');
+
+  loadTerraces();
+  updateScene(currentHour);
+  initMode();
+
+  // Recalcule les ombres quand on bouge la carte
+  map.on('moveend', () => updateScene(currentHour));
+  map.on('zoomend', () => updateScene(currentHour));
+});
+
+// ════════════════════════════════════
+// FICHE BAR
+// ════════════════════════════════════
+function showBar(t) {
+  document.getElementById('barName').textContent = t.name;
+  document.getElementById('barAddr').textContent = t.addr;
+  const st = document.getElementById('barStatus');
+  if (!t._inShade) {
+    st.className = 'bar-status sun';
+    st.textContent = '☀  Terrasse ensoleillée';
+  } else {
+    st.className = 'bar-status shade';
+    st.textContent = '  À l\'ombre en ce moment';
+  }
+  document.getElementById('bar-panel').style.display = 'block';
+  map.flyTo({ center: [t.lon, t.lat], zoom: Math.max(map.getZoom(), 17), duration: 700 });
+}
+document.getElementById('barClose').addEventListener('click', () => {
+  document.getElementById('bar-panel').style.display = 'none';
+});
+
+// ════════════════════════════════════
+// CONTRÔLES TEMPS
+// ════════════════════════════════════
+const slider = document.getElementById('slider');
+
+function setHour(h) {
+  currentHour = h;
+  slider.value = h;
+  const hh = Math.floor(h), mm = Math.round((h - hh) * 60);
+  document.getElementById('timeDisplay').textContent = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+  updateScene(h);
+}
+
+function initMode() {
+  if (isNowMode) {
+    const now = new Date();
+    setHour(Math.min(22, Math.max(5, now.getHours() + now.getMinutes() / 60)));
+    slider.disabled = true;
+    document.getElementById('dateDisplay').textContent =
+      now.toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long' });
+  } else {
+    slider.disabled = false;
+    document.getElementById('dateDisplay').textContent = 'Simulation';
+  }
+}
+
+slider.addEventListener('input', () => { if (!isNowMode) setHour(parseFloat(slider.value)); });
+
+document.getElementById('btnNow').addEventListener('click', () => {
+  isNowMode = true;
+  document.getElementById('btnNow').classList.add('active');
+  document.getElementById('btnManual').classList.remove('active');
+  stopPlay(); initMode();
+});
+document.getElementById('btnManual').addEventListener('click', () => {
+  isNowMode = false;
+  document.getElementById('btnManual').classList.add('active');
+  document.getElementById('btnNow').classList.remove('active');
+  slider.disabled = false;
+  document.getElementById('dateDisplay').textContent = 'Simulation';
+});
+
+// ════════════════════════════════════
+// LECTURE AUTO
+// ════════════════════════════════════
+function stopPlay() {
+  isPlaying = false; clearInterval(playTimer);
+  document.getElementById('playBtn').textContent = '▶ Simuler la journée';
+  document.getElementById('playBtn').classList.remove('playing');
+}
+document.getElementById('playBtn').addEventListener('click', () => {
+  if (isNowMode) document.getElementById('btnManual').click();
+  if (isPlaying) { stopPlay(); return; }
+  isPlaying = true;
+  document.getElementById('playBtn').textContent = '⏸ Pause';
+  document.getElementById('playBtn').classList.add('playing');
+  if (currentHour >= 21) setHour(5);
+  playTimer = setInterval(() => {
+    if (currentHour >= 21) { stopPlay(); return; }
+    setHour(Math.round((currentHour + 0.25) * 4) / 4);
+  }, 150);
+});
+
+// Refresh auto mode "maintenant"
+setInterval(() => { if (isNowMode) initMode(); }, 60000);
+</script>
+</body>
+</html>
