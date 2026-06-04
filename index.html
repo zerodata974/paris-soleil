@@ -84,6 +84,15 @@ input[type=range]:disabled { opacity: 0.4; cursor: default; }
 .leg:last-child { margin-bottom: 0; }
 .leg-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 .mapboxgl-ctrl-bottom-right { bottom: 65px !important; }
+.edit-btn { width: 100%; padding: 8px; border: 0.5px solid rgba(255,200,50,0.3); border-radius: 8px; background: rgba(255,200,50,0.06); color: #f5d060; font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+.edit-btn:hover { background: rgba(255,200,50,0.12); }
+.edit-btn.active { background: rgba(255,200,50,0.2); border-color: rgba(255,200,50,0.6); }
+.fix-btn { width: 100%; margin-top: 10px; padding: 8px; border: 0.5px solid rgba(255,200,50,0.3); border-radius: 8px; background: rgba(255,200,50,0.06); color: #f5d060; font-family: 'DM Sans', sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+.fix-btn:hover { background: rgba(255,200,50,0.12); }
+#edit-banner { display: none; position: absolute; top: 0; left: 0; right: 0; background: rgba(245,200,50,0.95); color: #1a0e00; font-size: 13px; font-weight: 500; padding: 10px 16px; z-index: 20; display: none; align-items: center; justify-content: space-between; }
+#edit-banner button { background: rgba(0,0,0,0.15); border: none; border-radius: 6px; padding: 4px 12px; font-size: 12px; font-weight: 600; cursor: pointer; color: #1a0e00; }
+.draggable-marker { cursor: grab !important; }
+.draggable-marker:active { cursor: grabbing !important; }
 </style>
 </head>
 <body>
@@ -132,7 +141,12 @@ input[type=range]:disabled { opacity: 0.4; cursor: default; }
       <div class="stat"><div class="stat-n" id="statShade">—</div><div class="stat-l">À l'ombre</div></div>
     </div>
     <button class="play-btn" id="playBtn">▶ Simuler la journée</button>
+    <button class="edit-btn" id="editBtn" style="margin-top:6px">✏️ Mode correction</button>
   </div>
+</div>
+<div id="edit-banner">
+  ✏️ Mode correction activé — clique sur un marqueur puis glisse-le à la bonne position
+  <button id="editClose">Terminer</button>
 </div>
 
 <div id="bar-panel">
@@ -148,6 +162,7 @@ input[type=range]:disabled { opacity: 0.4; cursor: default; }
     <span id="bwIcon">🌡️</span>
     <span id="bwText">—°C · Vent — km/h · Ressenti —°C</span>
   </div>
+  <button class="fix-btn" id="fixBtn">📍 Corriger la position</button>
 </div>
 
 <div id="legend">
@@ -560,6 +575,178 @@ document.getElementById('playBtn').addEventListener('click', () => {
 });
 
 setInterval(() => { if (isNowMode) initMode(); }, 60000);
+
+// ════════════════════════════════════
+// MODE ÉDITION — correction manuelle des positions
+// ════════════════════════════════════
+let editMode = false;
+let selectedForFix = null;
+let dragMarker = null;
+
+// Charge les corrections sauvegardées
+function loadCorrections() {
+  try {
+    return JSON.parse(localStorage.getItem('terraceCorrections') || '{}');
+  } catch(e) { return {}; }
+}
+
+function saveCorrection(id, lat, lon) {
+  const corrections = loadCorrections();
+  corrections[id] = { lat, lon };
+  localStorage.setItem('terraceCorrections', JSON.stringify(corrections));
+  console.log(`✅ Position corrigée pour ${id}: ${lat}, ${lon}`);
+}
+
+function applyCorrections() {
+  const corrections = loadCorrections();
+  let count = 0;
+  terraces.forEach(t => {
+    if (corrections[t.id]) {
+      t.lat = corrections[t.id].lat;
+      t.lon = corrections[t.id].lon;
+      count++;
+    }
+  });
+  if (count > 0) {
+    console.log(`✅ ${count} corrections appliquées`);
+    updateTerraceLayer(getSun(currentHour));
+  }
+}
+
+// Toggle mode édition
+document.getElementById('editBtn').addEventListener('click', () => {
+  editMode = !editMode;
+  document.getElementById('editBtn').classList.toggle('active', editMode);
+  document.getElementById('edit-banner').style.display = editMode ? 'flex' : 'none';
+  if (!editMode && dragMarker) {
+    dragMarker.remove();
+    dragMarker = null;
+  }
+});
+
+document.getElementById('editClose').addEventListener('click', () => {
+  editMode = false;
+  document.getElementById('editBtn').classList.remove('active');
+  document.getElementById('edit-banner').style.display = 'none';
+  if (dragMarker) { dragMarker.remove(); dragMarker = null; }
+});
+
+// Bouton corriger dans la fiche
+document.getElementById('fixBtn').addEventListener('click', () => {
+  if (!selectedForFix) return;
+  const t = selectedForFix;
+
+  // Ferme la fiche
+  document.getElementById('bar-panel').style.display = 'none';
+
+  // Active le mode édition si pas actif
+  if (!editMode) {
+    editMode = true;
+    document.getElementById('editBtn').classList.add('active');
+    document.getElementById('edit-banner').style.display = 'flex';
+  }
+
+  // Supprime l'ancien marqueur draggable
+  if (dragMarker) dragMarker.remove();
+
+  // Crée un marqueur draggable sur la position actuelle
+  const el = document.createElement('div');
+  el.style.cssText = `
+    width: 24px; height: 24px; border-radius: 50%;
+    background: #f5d060; border: 3px solid white;
+    box-shadow: 0 0 15px rgba(245,208,96,0.8);
+    cursor: grab; position: relative;
+  `;
+
+  // Label
+  const label = document.createElement('div');
+  label.style.cssText = `
+    position: absolute; top: -28px; left: 50%; transform: translateX(-50%);
+    background: rgba(10,12,18,0.9); color: #f5d060; font-size: 11px;
+    padding: 3px 8px; border-radius: 6px; white-space: nowrap;
+    font-family: DM Sans, sans-serif; font-weight: 500;
+    border: 0.5px solid rgba(245,208,96,0.4);
+  `;
+  label.textContent = t.name;
+  el.appendChild(label);
+
+  dragMarker = new mapboxgl.Marker({ element: el, anchor: 'center', draggable: true })
+    .setLngLat([t.lon, t.lat])
+    .addTo(map);
+
+  // Zoom sur la terrasse
+  map.flyTo({ center: [t.lon, t.lat], zoom: 18, duration: 800 });
+
+  // Bouton valider qui apparaît
+  showValidateBtn(t);
+
+  dragMarker.on('dragend', () => {
+    const pos = dragMarker.getLngLat();
+    showValidateBtn(t, pos.lat, pos.lng);
+  });
+});
+
+let validateBtn = null;
+function showValidateBtn(t, lat, lon) {
+  if (validateBtn) validateBtn.remove();
+
+  validateBtn = document.createElement('button');
+  validateBtn.textContent = '✅ Valider cette position';
+  validateBtn.style.cssText = `
+    position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%);
+    z-index: 20; padding: 10px 20px; border-radius: 10px;
+    background: #f5d060; color: #1a0e00; font-weight: 600;
+    font-family: DM Sans, sans-serif; font-size: 14px;
+    border: none; cursor: pointer; box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    white-space: nowrap;
+  `;
+  document.body.appendChild(validateBtn);
+
+  validateBtn.addEventListener('click', () => {
+    const pos = dragMarker ? dragMarker.getLngLat() : { lat: t.lat, lng: t.lon };
+    // Sauvegarde
+    saveCorrection(t.id, pos.lat, pos.lng);
+    // Applique sur la terrasse
+    t.lat = pos.lat;
+    t.lon = pos.lng;
+    // Update carte
+    updateTerraceLayer(getSun(currentHour));
+    // Nettoyage
+    if (dragMarker) { dragMarker.remove(); dragMarker = null; }
+    validateBtn.remove(); validateBtn = null;
+    // Confirmation
+    showToast(`📍 ${t.name} repositionné !`);
+  });
+}
+
+function showToast(msg) {
+  const toast = document.createElement('div');
+  toast.textContent = msg;
+  toast.style.cssText = `
+    position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%);
+    z-index: 30; padding: 10px 20px; border-radius: 10px;
+    background: rgba(10,12,18,0.95); color: #f5d060;
+    font-family: DM Sans, sans-serif; font-size: 13px; font-weight: 500;
+    border: 0.5px solid rgba(245,208,96,0.3);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4); white-space: nowrap;
+  `;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
+}
+
+// Clic sur terrasse en mode édition
+map.on('click', 'terraces-dot', (e) => {
+  const t = terraces.find(t => t.id == e.features[0].properties.id);
+  if (t) {
+    selectedForFix = t;
+    showBar(t);
+  }
+});
+
+// Applique les corrections au chargement
+map.on('load', () => {
+  setTimeout(applyCorrections, 3000);
+});
 </script>
 </body>
 </html>
