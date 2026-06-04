@@ -77,7 +77,7 @@ input[type=range]:disabled { opacity: 0.4; cursor: default; }
 .bar-status.shade { background: rgba(255,255,255,0.06); color: var(--ui-muted); border: 0.5px solid var(--ui-border); }
 .bar-price { font-size: 12px; color: var(--ui-muted); padding: 4px 8px; background: rgba(255,255,255,0.05); border-radius: 20px; border: 0.5px solid var(--ui-border); }
 .bar-type { font-size: 11px; color: var(--ui-muted); padding: 4px 8px; background: rgba(255,255,255,0.03); border-radius: 20px; border: 0.5px solid var(--ui-border); }
-.bar-weather { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ui-muted); padding: 8px 10px; background: rgba(255,255,255,0.03); border-radius: 8px; border: 0.5px solid var(--ui-border); }
+.bar-weather { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ui-muted); padding: 8px 10px; background: rgba(255,255,255,0.03); border-radius: 8px; border: 0.5px solid var(--ui-border); margin-top: 8px; }
 .bar-close { position: absolute; top: 10px; right: 12px; background: none; border: none; color: var(--ui-muted); cursor: pointer; font-size: 18px; padding: 2px 5px; }
 #legend { position: absolute; bottom: 20px; right: 16px; background: var(--ui-bg); border: 0.5px solid var(--ui-border); border-radius: 8px; padding: 8px 12px; font-size: 12px; z-index: 10; backdrop-filter: blur(20px); }
 .leg { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; color: var(--ui-text); }
@@ -145,7 +145,7 @@ input[type=range]:disabled { opacity: 0.4; cursor: default; }
     <div class="bar-type" id="barType">Café</div>
   </div>
   <div class="bar-weather">
-    <span id="bwIcon">☀</span>
+    <span id="bwIcon">🌡️</span>
     <span id="bwText">—°C · Vent — km/h · Ressenti —°C</span>
   </div>
 </div>
@@ -180,48 +180,51 @@ let terraces = [];
 let mapReady = false;
 let weatherData = null;
 
-const WMO_ICONS = {
-  0:'☀️',1:'🌤️',2:'⛅',3:'☁️',45:'🌫️',48:'🌫️',
-  51:'🌦️',53:'🌦️',55:'🌧️',61:'🌧️',63:'🌧️',65:'🌧️',
-  71:'🌨️',73:'🌨️',75:'🌨️',80:'🌦️',81:'🌧️',82:'⛈️',
-  95:'⛈️',96:'⛈️',99:'⛈️',
-};
-const WMO_DESC = {
-  0:'Ciel dégagé',1:'Peu nuageux',2:'Partiellement nuageux',3:'Couvert',
-  45:'Brouillard',48:'Brouillard givrant',51:'Bruine légère',53:'Bruine',
-  55:'Bruine forte',61:'Pluie légère',63:'Pluie',65:'Pluie forte',
-  71:'Neige légère',73:'Neige',75:'Neige forte',80:'Averses légères',
-  81:'Averses',82:'Averses fortes',95:'Orage',96:'Orage avec grêle',99:'Orage violent',
-};
-
+// ════════════════════════════════════
+// MÉTÉO — wttr.in (sans CORS, sans clé)
+// ════════════════════════════════════
 async function loadWeather() {
   try {
-    const res = await fetch(
-      'https://api.open-meteo.com/v1/forecast?latitude=48.8566&longitude=2.3488' +
-      '&current_weather=true&hourly=apparent_temperature,relativehumidity_2m' +
-      '&timezone=Europe%2FParis&forecast_days=1'
-    );
+    const res = await fetch('https://wttr.in/Paris?format=j1');
     const data = await res.json();
-    const w = data.current_weather;
-    const idx = new Date().getHours();
+    const c = data.current_condition[0];
     weatherData = {
-      temp: Math.round(w.temperature),
-      feel: Math.round(data.hourly.apparent_temperature[idx]),
-      wind: Math.round(w.windspeed),
-      humid: data.hourly.relativehumidity_2m[idx],
-      code: w.weathercode,
+      temp: parseInt(c.temp_C),
+      feel: parseInt(c.FeelsLikeC),
+      wind: parseInt(c.windspeedKmph),
+      humid: parseInt(c.humidity),
+      desc: c.lang_fr?.[0]?.value || c.weatherDesc?.[0]?.value || 'Variable',
+      code: parseInt(c.weatherCode),
     };
-    document.getElementById('wIcon').textContent = WMO_ICONS[weatherData.code] || '🌡️';
+    const icon = getWeatherIcon(weatherData.code);
+    document.getElementById('wIcon').textContent = icon;
     document.getElementById('wTemp').textContent = weatherData.temp + '°';
-    document.getElementById('wDesc').textContent = WMO_DESC[weatherData.code] || 'Variable';
+    document.getElementById('wDesc').textContent = weatherData.desc;
     document.getElementById('wWind').textContent = '💨 ' + weatherData.wind + ' km/h';
     document.getElementById('wHumid').textContent = '💧 ' + weatherData.humid + '%';
     document.getElementById('wFeel').textContent = 'Ressenti ' + weatherData.feel + '°';
   } catch(e) {
     document.getElementById('wDesc').textContent = 'Météo indisponible';
+    console.warn('Météo:', e);
   }
 }
 
+function getWeatherIcon(code) {
+  if (code === 113) return '☀️';
+  if (code === 116) return '🌤️';
+  if (code === 119) return '⛅';
+  if (code === 122) return '☁️';
+  if ([143,248,260].includes(code)) return '🌫️';
+  if ([176,293,296,299,302,305,308].includes(code)) return '🌧️';
+  if ([179,182,185,281,284,323,326,329,332,335,338,350,368,371,374,377].includes(code)) return '🌨️';
+  if ([200,386,389,392,395].includes(code)) return '⛈️';
+  if ([263,266].includes(code)) return '🌦️';
+  return '🌡️';
+}
+
+// ════════════════════════════════════
+// SOLEIL
+// ════════════════════════════════════
 function getSun(hour) {
   const d = new Date();
   d.setHours(Math.floor(hour), Math.round((hour % 1) * 60), 0, 0);
@@ -321,6 +324,9 @@ function updateTerraceLayer(sun) {
   document.getElementById('statShade').textContent = terraces.length - sunlit;
 }
 
+// ════════════════════════════════════
+// DONNÉES OSM — 3 serveurs de secours
+// ════════════════════════════════════
 function getPriceLabel(tags) {
   const a = tags?.amenity || '';
   if (a === 'cafe') return '€';
@@ -329,7 +335,7 @@ function getPriceLabel(tags) {
   return '€€';
 }
 function getTypeLabel(tags) {
-  return {'bar':'Bar','cafe':'Café','restaurant':'Restaurant','pub':'Pub','biergarten':'Brasserie'}[tags?.amenity] || 'Commerce';
+  return { 'bar':'Bar','cafe':'Café','restaurant':'Restaurant','pub':'Pub','biergarten':'Brasserie' }[tags?.amenity] || 'Commerce';
 }
 
 async function loadTerraces() {
@@ -337,36 +343,69 @@ async function loadTerraces() {
     node["amenity"~"^(bar|cafe|pub|restaurant|biergarten)$"](48.80,2.25,48.92,2.47);
     way["amenity"~"^(bar|cafe|pub|restaurant|biergarten)$"](48.80,2.25,48.92,2.47);
   );out center 2000;`;
-  try {
-    const res = await fetch('https://overpass.kumi.systems/api/interpreter', {
-      method: 'POST', body: 'data=' + encodeURIComponent(query)
-    });
-    const data = await res.json();
-    terraces = data.elements
-      .filter(el => (el.lat || el.center?.lat) && el.tags?.name)
-      .map(el => ({
-        id: el.id,
-        name: el.tags.name,
-        lat: el.lat ?? el.center.lat,
-        lon: el.lon ?? el.center.lon,
-        addr: [el.tags?.['addr:housenumber'], el.tags?.['addr:street']].filter(Boolean).join(' ') || 'Paris',
-        price: getPriceLabel(el.tags),
-        type: getTypeLabel(el.tags),
-      }));
-    console.log(`✅ ${terraces.length} établissements chargés`);
-  } catch(e) {
-    terraces = [
-      { id:1, name:'Le Fumoir', lat:48.8602, lon:2.3371, addr:'6 Rue de l\'Amiral de Coligny', price:'€€€', type:'Bar' },
-      { id:2, name:'Café de Flore', lat:48.8540, lon:2.3330, addr:'172 Bd Saint-Germain', price:'€€€', type:'Café' },
-      { id:3, name:'Les Deux Magots', lat:48.8539, lon:2.3334, addr:'6 Pl. Saint-Germain des Prés', price:'€€€', type:'Café' },
-      { id:4, name:'Le Progrès', lat:48.8652, lon:2.3503, addr:'7 Rue de Bretagne', price:'€', type:'Bar' },
-      { id:5, name:'Café de la Paix', lat:48.8718, lon:2.3314, addr:'5 Pl. de l\'Opéra', price:'€€€€', type:'Café' },
-      { id:6, name:'Le Nemours', lat:48.8641, lon:2.3366, addr:'2 Pl. Colette', price:'€€', type:'Café' },
-    ];
+
+  const servers = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+    'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+  ];
+
+  for (const server of servers) {
+    try {
+      console.log(`Tentative sur ${server}...`);
+      const res = await fetch(server, {
+        method: 'POST',
+        body: 'data=' + encodeURIComponent(query),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      terraces = data.elements
+        .filter(el => (el.lat || el.center?.lat) && el.tags?.name)
+        .map(el => ({
+          id: el.id,
+          name: el.tags.name,
+          lat: el.lat ?? el.center.lat,
+          lon: el.lon ?? el.center.lon,
+          addr: [el.tags?.['addr:housenumber'], el.tags?.['addr:street']].filter(Boolean).join(' ') || 'Paris',
+          price: getPriceLabel(el.tags),
+          type: getTypeLabel(el.tags),
+        }));
+      console.log(`✅ ${terraces.length} établissements chargés depuis ${server}`);
+      break;
+    } catch(e) {
+      console.warn(`❌ ${server} indisponible:`, e.message);
+    }
   }
+
+  if (terraces.length === 0) {
+    console.warn('Tous les serveurs indisponibles, données de démo');
+    useDemoData();
+  }
+
   updateTerraceLayer(getSun(currentHour));
 }
 
+function useDemoData() {
+  terraces = [
+    { id:1, name:'Le Fumoir', lat:48.8602, lon:2.3371, addr:'6 Rue de l\'Amiral de Coligny', price:'€€€', type:'Bar' },
+    { id:2, name:'Café de Flore', lat:48.8540, lon:2.3330, addr:'172 Bd Saint-Germain', price:'€€€', type:'Café' },
+    { id:3, name:'Les Deux Magots', lat:48.8539, lon:2.3334, addr:'6 Pl. Saint-Germain des Prés', price:'€€€', type:'Café' },
+    { id:4, name:'Le Progrès', lat:48.8652, lon:2.3503, addr:'7 Rue de Bretagne', price:'€', type:'Bar' },
+    { id:5, name:'Café de la Paix', lat:48.8718, lon:2.3314, addr:'5 Pl. de l\'Opéra', price:'€€€€', type:'Café' },
+    { id:6, name:'Le Nemours', lat:48.8641, lon:2.3366, addr:'2 Pl. Colette', price:'€€', type:'Café' },
+    { id:7, name:'Brasserie Lipp', lat:48.8540, lon:2.3325, addr:'151 Bd Saint-Germain', price:'€€€', type:'Restaurant' },
+    { id:8, name:'La Palette', lat:48.8534, lon:2.3380, addr:'43 Rue de Seine', price:'€€', type:'Bar' },
+    { id:9, name:'Café Charlot', lat:48.8625, lon:2.3599, addr:'38 Rue de Bretagne', price:'€€', type:'Café' },
+    { id:10, name:'Le Baron Rouge', lat:48.8493, lon:2.3745, addr:'1 Rue Théophile Roussel', price:'€', type:'Bar' },
+    { id:11, name:'Chez Janou', lat:48.8562, lon:2.3611, addr:'2 Rue Roger Verlomme', price:'€€', type:'Restaurant' },
+    { id:12, name:'Café Beaubourg', lat:48.8606, lon:2.3518, addr:'43 Rue Saint-Merri', price:'€€', type:'Café' },
+  ];
+}
+
+// ════════════════════════════════════
+// INIT CARTE
+// ════════════════════════════════════
 map.on('load', () => {
   mapReady = true;
 
@@ -408,7 +447,6 @@ map.on('load', () => {
   }, '3d-buildings');
 
   map.addSource('terraces', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-
   map.addLayer({
     id: 'terraces-glow', type: 'circle', source: 'terraces',
     paint: {
@@ -417,7 +455,6 @@ map.on('load', () => {
       'circle-blur': 0.8,
     }
   });
-
   map.addLayer({
     id: 'terraces-dot', type: 'circle', source: 'terraces',
     paint: {
@@ -444,6 +481,9 @@ map.on('load', () => {
   setInterval(loadWeather, 10 * 60 * 1000);
 });
 
+// ════════════════════════════════════
+// FICHE BAR
+// ════════════════════════════════════
 function showBar(t) {
   document.getElementById('barName').textContent = t.name;
   document.getElementById('barAddr').textContent = t.addr;
@@ -453,7 +493,7 @@ function showBar(t) {
   st.className = t._inShade ? 'bar-status shade' : 'bar-status sun';
   st.textContent = t._inShade ? '🌑  À l\'ombre' : '☀  Ensoleillée';
   if (weatherData) {
-    document.getElementById('bwIcon').textContent = WMO_ICONS[weatherData.code] || '🌡️';
+    document.getElementById('bwIcon').textContent = getWeatherIcon(weatherData.code);
     document.getElementById('bwText').textContent = `${weatherData.temp}°C · 💨 ${weatherData.wind} km/h · Ressenti ${weatherData.feel}°C`;
   }
   document.getElementById('bar-panel').style.display = 'block';
@@ -464,6 +504,9 @@ document.getElementById('barClose').addEventListener('click', () => {
   document.getElementById('bar-panel').style.display = 'none';
 });
 
+// ════════════════════════════════════
+// CONTRÔLES TEMPS
+// ════════════════════════════════════
 const slider = document.getElementById('slider');
 
 function setHour(h) {
