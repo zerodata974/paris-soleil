@@ -161,7 +161,7 @@ mapboxgl.accessToken = MAPBOX_KEY;
 
 const map = new mapboxgl.Map({
   container: 'map',
-  style: 'mapbox://styles/mapbox/dark-v11',
+  style: 'mapbox://styles/mapbox/standard',
   center: [2.3488, 48.8534],
   zoom: 15,
   pitch: 55,
@@ -249,13 +249,39 @@ function updateSunLight(sun) {
   if (!mapReady) return;
   const isDay = sun.altitude > 1;
   try {
-    map.setLight({
-      anchor: 'map',
-      color: isDay ? '#fff5e0' : '#1a2040',
-      intensity: isDay ? Math.max(0.2, Math.min(1, sun.altitude / 50)) : 0.05,
-      position: [1.5, sun.azimuth, Math.max(1, 90 - sun.altitude)],
-    });
-  } catch(e) {}
+    // Mapbox Standard : vraies ombres portées des bâtiments
+    map.setLights([
+      {
+        id: 'ambient',
+        type: 'ambient',
+        properties: {
+          color: isDay ? '#fff5e0' : '#1a2040',
+          intensity: isDay ? 0.3 : 0.05,
+        }
+      },
+      {
+        id: 'directional',
+        type: 'directional',
+        properties: {
+          color: '#ffffff',
+          intensity: isDay ? Math.max(0.2, Math.min(1, sun.altitude / 50)) : 0,
+          direction: [sun.azimuth, Math.max(1, 90 - sun.altitude)],
+          'cast-shadows': true,
+          'shadow-intensity': isDay ? Math.min(1, sun.altitude / 30) : 0,
+        }
+      }
+    ]);
+  } catch(e) {
+    // Fallback ancien style
+    try {
+      map.setLight({
+        anchor: 'map',
+        color: isDay ? '#fff5e0' : '#1a2040',
+        intensity: isDay ? Math.max(0.2, Math.min(1, sun.altitude / 50)) : 0.05,
+        position: [1.5, sun.azimuth, Math.max(1, 90 - sun.altitude)],
+      });
+    } catch(e2) {}
+  }
   if (map.getLayer('3d-buildings')) {
     map.setPaintProperty('3d-buildings', 'fill-extrusion-opacity', isDay ? 0.85 : 0.95);
     const s = isDay ? Math.round(35 + (sun.altitude / 60) * 30) : 20;
@@ -266,35 +292,9 @@ function updateSunLight(sun) {
       60, `rgb(${s+25},${s+32},${s+50})`,
     ]);
   }
-  updateSunZones(sun);
 }
 
-function updateSunZones(sun) {
-  if (!mapReady || !map.getSource('sun-zones')) return;
-  if (sun.altitude <= 1) {
-    map.getSource('sun-zones').setData({ type: 'FeatureCollection', features: [] });
-    return;
-  }
-  const b = map.getBounds();
-  const steps = 25;
-  const dlng = (b.getEast() - b.getWest()) / steps;
-  const dlat = (b.getNorth() - b.getSouth()) / steps;
-  const features = [];
-  for (let i = 0; i <= steps; i++) {
-    for (let j = 0; j <= steps; j++) {
-      const lng = b.getWest() + i * dlng;
-      const lat = b.getSouth() + j * dlat;
-      if (!isInShadow(lat, lng, sun)) {
-        features.push({
-          type: 'Feature',
-          geometry: { type: 'Point', coordinates: [lng, lat] },
-          properties: { intensity: Math.min(1, sun.altitude / 40) }
-        });
-      }
-    }
-  }
-  map.getSource('sun-zones').setData({ type: 'FeatureCollection', features });
-}
+
 
 function updateScene(hour) {
   const sun = getSun(hour);
@@ -409,6 +409,12 @@ function useDemoData() {
 map.on('load', () => {
   mapReady = true;
 
+  // Config style Standard : thème sombre + ombres activées
+  try {
+    map.setConfigProperty('basemap', 'lightPreset', 'night');
+    map.setConfigProperty('basemap', 'showPointOfInterestLabels', false);
+  } catch(e) {}
+
   map.addLayer({
     id: '3d-buildings',
     source: 'composite',
@@ -426,33 +432,24 @@ map.on('load', () => {
     }
   });
 
-  map.addSource('sun-zones', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-  map.addLayer({
-    id: 'sun-heatmap',
-    type: 'heatmap',
-    source: 'sun-zones',
-    paint: {
-      'heatmap-weight': ['get', 'intensity'],
-      'heatmap-intensity': 1.2,
-      'heatmap-radius': 35,
-      'heatmap-opacity': 0.6,
-      'heatmap-color': [
-        'interpolate', ['linear'], ['heatmap-density'],
-        0, 'rgba(245,166,35,0)',
-        0.2, 'rgba(245,166,35,0.3)',
-        0.5, 'rgba(255,200,50,0.5)',
-        1, 'rgba(255,220,80,0.7)',
-      ],
-    }
-  });
+  // Heatmap supprimée — remplacée par halos sur les terrasses
 
   map.addSource('terraces', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  // Halo large et visible pour terrasses ensoleillées
+  map.addLayer({
+    id: 'terraces-glow2', type: 'circle', source: 'terraces',
+    paint: {
+      'circle-radius': 28,
+      'circle-color': ['case', ['==', ['get', 'sunny'], 1], 'rgba(255,200,50,0.12)', 'rgba(0,0,0,0)'],
+      'circle-blur': 1,
+    }
+  });
   map.addLayer({
     id: 'terraces-glow', type: 'circle', source: 'terraces',
     paint: {
       'circle-radius': 16,
-      'circle-color': ['case', ['==', ['get', 'sunny'], 1], 'rgba(245,166,35,0.2)', 'rgba(0,0,0,0)'],
-      'circle-blur': 0.8,
+      'circle-color': ['case', ['==', ['get', 'sunny'], 1], 'rgba(245,166,35,0.35)', 'rgba(0,0,0,0)'],
+      'circle-blur': 0.6,
     }
   });
   map.addLayer({
@@ -471,8 +468,7 @@ map.on('load', () => {
   });
   map.on('mouseenter', 'terraces-dot', () => { map.getCanvas().style.cursor = 'pointer'; });
   map.on('mouseleave', 'terraces-dot', () => { map.getCanvas().style.cursor = ''; });
-  map.on('moveend', () => updateSunZones(getSun(currentHour)));
-  map.on('zoomend', () => updateSunZones(getSun(currentHour)));
+
 
   loadTerraces();
   loadWeather();
