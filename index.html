@@ -433,18 +433,18 @@ map.on('load', () => {
     source: 'sun-zones',
     paint: {
       'heatmap-weight': ['get', 'intensity'],
-      'heatmap-intensity': 0.6,
+      'heatmap-intensity': 1.2,
       'heatmap-radius': 35,
-      'heatmap-opacity': 0.25,
+      'heatmap-opacity': 0.6,
       'heatmap-color': [
         'interpolate', ['linear'], ['heatmap-density'],
         0, 'rgba(245,166,35,0)',
-        0.3, 'rgba(245,166,35,0.15)',
-        0.6, 'rgba(255,200,50,0.25)',
-        1, 'rgba(255,220,80,0.4)',
+        0.2, 'rgba(245,166,35,0.3)',
+        0.5, 'rgba(255,200,50,0.5)',
+        1, 'rgba(255,220,80,0.7)',
       ],
     }
-  }, '3d-buildings');
+  });
 
   map.addSource('terraces', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addLayer({
