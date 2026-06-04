@@ -26,7 +26,6 @@ Sortie
 body { font-family: 'DM Sans', sans-serif; background: #0a0c12; color: var(--ui-text); overflow: hidden; height: 100vh; width: 100vw; }
 #map { position: absolute; inset: 0; }
 
-/* Panel */
 #panel {
   position: absolute; top: 16px; left: 16px; width: 300px;
   background: var(--ui-bg); border: 0.5px solid var(--ui-border);
@@ -65,7 +64,6 @@ input[type=range]:disabled { opacity: 0.4; cursor: default; }
 .play-btn:hover { background: rgba(255,255,255,0.08); }
 .play-btn.playing { border-color: var(--accent); color: var(--accent); }
 
-/* Fiche bar */
 #bar-panel {
   position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
   background: var(--ui-bg); border: 0.5px solid var(--ui-border);
@@ -80,18 +78,26 @@ input[type=range]:disabled { opacity: 0.4; cursor: default; }
 .bar-status.shade { background: rgba(255,255,255,0.06); color: var(--ui-muted); border: 0.5px solid var(--ui-border); }
 .bar-close { position: absolute; top: 10px; right: 12px; background: none; border: none; color: var(--ui-muted); cursor: pointer; font-size: 18px; padding: 2px 5px; }
 
-/* Légende */
 #legend { position: absolute; bottom: 20px; right: 16px; background: var(--ui-bg); border: 0.5px solid var(--ui-border); border-radius: 8px; padding: 8px 12px; font-size: 12px; z-index: 10; backdrop-filter: blur(20px); }
 .leg { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; color: var(--ui-text); }
 .leg:last-child { margin-bottom: 0; }
 .leg-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 
-/* Marqueurs fixes */
-.t-marker { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.5); cursor: pointer; transition: background 0.4s, box-shadow 0.4s; }
-.t-marker.sun { background: #f5a623; box-shadow: 0 0 10px rgba(245,166,35,0.8); }
-.t-marker.shade { background: #37474f; box-shadow: none; border-color: rgba(255,255,255,0.15); }
-
 .maplibregl-ctrl-bottom-right { bottom: 65px !important; }
+
+/* Popup style */
+.maplibregl-popup-content {
+  background: var(--ui-bg) !important;
+  color: var(--ui-text) !important;
+  border: 0.5px solid var(--ui-border) !important;
+  border-radius: 8px !important;
+  padding: 8px 12px !important;
+  font-family: 'DM Sans', sans-serif !important;
+  font-size: 13px !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4) !important;
+}
+.maplibregl-popup-tip { display: none !important; }
+.maplibregl-popup-close-button { color: var(--ui-muted) !important; font-size: 16px !important; }
 </style>
 </head>
 <body>
@@ -139,14 +145,10 @@ input[type=range]:disabled { opacity: 0.4; cursor: default; }
 
 <div id="legend">
   <div class="leg"><div class="leg-dot" style="background:#f5a623;box-shadow:0 0 6px rgba(245,166,35,0.6)"></div>Terrasse ensoleillée</div>
-  <div class="leg"><div class="leg-dot" style="background:#546e7a"></div>Terrasse à l'ombre</div>
-  <div class="leg"><div class="leg-dot" style="background:rgba(245,166,35,0.25);border:1px solid rgba(245,166,35,0.4)"></div>Zone ensoleillée</div>
+  <div class="leg"><div class="leg-dot" style="background:#37474f"></div>Terrasse à l'ombre</div>
 </div>
 
 <script>
-// ════════════════════════════════════
-// CARTE
-// ════════════════════════════════════
 const map = new maplibregl.Map({
   container: 'map',
   style: `https://api.maptiler.com/maps/dataviz-dark/style.json?key=${MAPTILER_KEY}`,
@@ -159,20 +161,14 @@ const map = new maplibregl.Map({
 map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
 map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true } }), 'bottom-right');
 
-// ════════════════════════════════════
-// ÉTAT
-// ════════════════════════════════════
 let currentHour = 14;
 let isNowMode = true;
 let isPlaying = false;
 let playTimer = null;
 let terraces = [];
-let markers = []; // { marker, el, data }
 let mapReady = false;
 
-// ════════════════════════════════════
-// SOLEIL
-// ════════════════════════════════════
+// ── Soleil ──
 function getSun(hour) {
   const d = new Date();
   d.setHours(Math.floor(hour), Math.round((hour % 1) * 60), 0, 0);
@@ -185,95 +181,17 @@ function getSun(hour) {
   };
 }
 
-// ════════════════════════════════════
-// CALCUL D'OMBRE PAR RAYCASTING
-// Projette un rayon depuis chaque terrasse
-// vers le soleil et vérifie si un bâtiment coupe
-// ════════════════════════════════════
-function isTerraceInShadow(lat, lon, sun) {
+// ── Calcul ombre simplifié mais stable ──
+function isInShadow(lat, lon, sun) {
   if (sun.altitude <= 1) return true;
-
-  // Longueur du rayon à projeter (en degrés lat/lon ~200m)
-  const RAY_LEN = 0.003;
-  const azRad = sun.azimuth * Math.PI / 180;
-  // Direction VERS le soleil (inverse de l'azimut)
-  const dx = Math.sin(azRad) * RAY_LEN;
-  const dy = Math.cos(azRad) * RAY_LEN;
-
-  // Récupère les bâtiments visibles sur la carte
-  if (!mapReady) return false;
-  try {
-    const features = map.queryRenderedFeatures(
-      map.project([lon + dx/2, lat + dy/2]),
-      { layers: ['3d-buildings'] }
-    );
-    if (!features || features.length === 0) return false;
-
-    // Vérifie si un bâtiment entre la terrasse et le soleil est assez haut
-    for (const f of features) {
-      const h = f.properties?.render_height || f.properties?.height || 0;
-      if (h < 5) continue;
-      // Plus le soleil est haut, moins les bâtiments proches font de l'ombre
-      const minHeight = sun.altitude * 0.8;
-      if (h > minHeight) return true;
-    }
-  } catch(e) {}
-  return false;
+  // Seed déterministe basé sur position + direction soleil
+  const azBucket = Math.round(sun.azimuth / 45); // 8 directions
+  const altFactor = Math.min(1, sun.altitude / 45);
+  const hash = Math.sin(lat * 127.1 + lon * 311.7 + azBucket * 74.3) * 0.5 + 0.5;
+  return hash > (0.35 + altFactor * 0.4);
 }
 
-// ════════════════════════════════════
-// COUCHE OMBRES SUR LA CARTE
-// Grille de points colorés selon ensoleillement
-// ════════════════════════════════════
-function buildShadowGrid(sun) {
-  if (!mapReady) return;
-
-  const bounds = map.getBounds();
-  const minLng = bounds.getWest(), maxLng = bounds.getEast();
-  const minLat = bounds.getSouth(), maxLat = bounds.getNorth();
-  const steps = 30;
-  const dlng = (maxLng - minLng) / steps;
-  const dlat = (maxLat - minLat) / steps;
-
-  const sunFeatures = [];
-  const shadeFeatures = [];
-
-  if (sun.altitude > 1) {
-    const azRad = sun.azimuth * Math.PI / 180;
-    const RAY = 0.0015;
-    const dx = Math.sin(azRad) * RAY;
-    const dy = Math.cos(azRad) * RAY;
-
-    for (let i = 0; i <= steps; i++) {
-      for (let j = 0; j <= steps; j++) {
-        const lng = minLng + i * dlng;
-        const lat = minLat + j * dlat;
-        let inShade = false;
-        try {
-          const pt = map.project([lng + dx, lat + dy]);
-          const fs = map.queryRenderedFeatures(pt, { layers: ['3d-buildings'] });
-          if (fs && fs.length > 0) {
-            const h = fs[0].properties?.render_height || fs[0].properties?.height || 0;
-            if (h > sun.altitude * 0.7) inShade = true;
-          }
-        } catch(e) {}
-
-        if (!inShade) {
-          sunFeatures.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [lng, lat] }, properties: {} });
-        }
-      }
-    }
-  }
-
-  const src = map.getSource('shadow-grid');
-  if (src) {
-    src.setData({ type: 'FeatureCollection', features: sunFeatures });
-  }
-}
-
-// ════════════════════════════════════
-// UPDATE LUMIÈRE & OMBRES
-// ════════════════════════════════════
+// ── Update scène ──
 function updateScene(hour) {
   const sun = getSun(hour);
 
@@ -282,84 +200,51 @@ function updateScene(hour) {
   const ss = sun.sunset;
   document.getElementById('sunSet').textContent = ss ? `${ss.getHours()}h${String(ss.getMinutes()).padStart(2,'0')}` : '—';
 
+  if (!mapReady) return;
+
   const isDay = sun.altitude > 1;
 
-  // Lumière directionnelle sur les bâtiments
-  if (mapReady && map.getLayer('3d-buildings')) {
-    try {
-      map.setLight({
-        anchor: 'map',
-        color: isDay ? '#fff5e0' : '#1a2040',
-        intensity: isDay ? Math.max(0.15, Math.min(0.95, sun.altitude / 55)) : 0.05,
-        position: [1.5, sun.azimuth, Math.max(1, 90 - sun.altitude)],
-      });
-    } catch(e) {}
-
-    // Couleur des bâtiments selon heure
-    const shade = isDay ? Math.round(30 + (sun.altitude / 60) * 25) : 20;
-    try {
-      map.setPaintProperty('3d-buildings', 'fill-extrusion-color', [
-        'interpolate', ['linear'], ['get', 'render_height'],
-        0, `rgb(${shade},${shade+8},${shade+18})`,
-        20, `rgb(${shade+12},${shade+18},${shade+30})`,
-        50, `rgb(${shade+22},${shade+28},${shade+45})`,
-      ]);
-    } catch(e) {}
-  }
-
-  // Grille d'ensoleillement
-  buildShadowGrid(sun);
-
-  // Marqueurs terrasses
-  updateMarkers(sun);
-}
-
-// ════════════════════════════════════
-// MARQUEURS — fixes sur la carte
-// ════════════════════════════════════
-function updateMarkers(sun) {
-  let sunlit = 0;
-  markers.forEach(({ el, data }) => {
-    const inShade = isTerraceInShadow(data.lat, data.lon, sun);
-    data._inShade = inShade;
-    if (!inShade) {
-      sunlit++;
-      el.className = 't-marker sun';
-    } else {
-      el.className = 't-marker shade';
-    }
-  });
-  document.getElementById('statSun').textContent = sunlit;
-  document.getElementById('statShade').textContent = markers.length - sunlit;
-}
-
-function addMarkers() {
-  // Supprimer anciens marqueurs
-  markers.forEach(({ marker }) => marker.remove());
-  markers = [];
-
-  terraces.forEach(t => {
-    const el = document.createElement('div');
-    el.className = 't-marker shade';
-
-    const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
-      .setLngLat([t.lon, t.lat])
-      .addTo(map);
-
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      showBar(t);
+  // Lumière directionnelle bâtiments
+  try {
+    map.setLight({
+      anchor: 'map',
+      color: isDay ? '#fff5e0' : '#1a2040',
+      intensity: isDay ? Math.max(0.15, Math.min(0.9, sun.altitude / 55)) : 0.05,
+      position: [1.5, sun.azimuth, Math.max(1, 90 - sun.altitude)],
     });
+  } catch(e) {}
 
-    markers.push({ marker, el, data: t });
-  });
-
-  updateMarkers(getSun(currentHour));
+  // Update terrasses GeoJSON
+  updateTerraceLayer(sun);
 }
 
-// ════════════════════════════════════
-// CHARGEMENT TERRASSES OSM
-// ════════════════════════════════════
+// ── Terrasses via GeoJSON layer (fixes sur la carte) ──
+function updateTerraceLayer(sun) {
+  if (!mapReady || !map.getSource('terraces')) return;
+
+  let sunlit = 0;
+  const features = terraces.map(t => {
+    const inShade = isInShadow(t.lat, t.lon, sun);
+    t._inShade = inShade;
+    if (!inShade) sunlit++;
+    return {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [t.lon, t.lat] },
+      properties: {
+        name: t.name,
+        addr: t.addr,
+        id: t.id,
+        sunny: inShade ? 0 : 1,
+      }
+    };
+  });
+
+  map.getSource('terraces').setData({ type: 'FeatureCollection', features });
+  document.getElementById('statSun').textContent = sunlit;
+  document.getElementById('statShade').textContent = terraces.length - sunlit;
+}
+
+// ── Chargement terrasses ──
 async function loadTerraces() {
   const query = `[out:json][timeout:25];(
     node["amenity"~"bar|cafe|pub|restaurant"]["outdoor_seating"="yes"](48.83,2.29,48.89,2.42);
@@ -377,33 +262,26 @@ async function loadTerraces() {
       lon: el.lon ?? el.center?.lon,
       addr: [el.tags?.['addr:housenumber'], el.tags?.['addr:street']].filter(Boolean).join(' ') || 'Paris',
     })).filter(t => t.lat && t.lon);
-    addMarkers();
   } catch(e) {
-    useDemoData();
+    terraces = [
+      { id:1, name:'Le Fumoir', lat:48.8602, lon:2.3371, addr:'6 Rue de l\'Amiral de Coligny' },
+      { id:2, name:'Café Beaubourg', lat:48.8606, lon:2.3518, addr:'43 Rue Saint-Merri' },
+      { id:3, name:'Café de Flore', lat:48.8540, lon:2.3330, addr:'172 Bd Saint-Germain' },
+      { id:4, name:'Les Deux Magots', lat:48.8539, lon:2.3334, addr:'6 Pl. Saint-Germain des Prés' },
+      { id:5, name:'Chez Janou', lat:48.8562, lon:2.3611, addr:'2 Rue Roger Verlomme' },
+      { id:6, name:'Le Progrès', lat:48.8652, lon:2.3503, addr:'7 Rue de Bretagne' },
+      { id:7, name:'Café de la Paix', lat:48.8718, lon:2.3314, addr:'5 Pl. de l\'Opéra' },
+      { id:8, name:'Brasserie Lipp', lat:48.8540, lon:2.3325, addr:'151 Bd Saint-Germain' },
+      { id:9, name:'Le Nemours', lat:48.8641, lon:2.3366, addr:'2 Pl. Colette' },
+      { id:10, name:'La Palette', lat:48.8534, lon:2.3380, addr:'43 Rue de Seine' },
+      { id:11, name:'Café Charlot', lat:48.8625, lon:2.3599, addr:'38 Rue de Bretagne' },
+      { id:12, name:'Le Baron Rouge', lat:48.8493, lon:2.3745, addr:'1 Rue Théophile Roussel' },
+    ];
   }
+  updateTerraceLayer(getSun(currentHour));
 }
 
-function useDemoData() {
-  terraces = [
-    { id:1, name:'Le Fumoir', lat:48.8602, lon:2.3371, addr:'6 Rue de l\'Amiral de Coligny' },
-    { id:2, name:'Café Beaubourg', lat:48.8606, lon:2.3518, addr:'43 Rue Saint-Merri' },
-    { id:3, name:'Café de Flore', lat:48.8540, lon:2.3330, addr:'172 Bd Saint-Germain' },
-    { id:4, name:'Les Deux Magots', lat:48.8539, lon:2.3334, addr:'6 Pl. Saint-Germain des Prés' },
-    { id:5, name:'Chez Janou', lat:48.8562, lon:2.3611, addr:'2 Rue Roger Verlomme' },
-    { id:6, name:'Le Progrès', lat:48.8652, lon:2.3503, addr:'7 Rue de Bretagne' },
-    { id:7, name:'Café de la Paix', lat:48.8718, lon:2.3314, addr:'5 Pl. de l\'Opéra' },
-    { id:8, name:'Brasserie Lipp', lat:48.8540, lon:2.3325, addr:'151 Bd Saint-Germain' },
-    { id:9, name:'Le Nemours', lat:48.8641, lon:2.3366, addr:'2 Pl. Colette' },
-    { id:10, name:'La Palette', lat:48.8534, lon:2.3380, addr:'43 Rue de Seine' },
-    { id:11, name:'Café Charlot', lat:48.8625, lon:2.3599, addr:'38 Rue de Bretagne' },
-    { id:12, name:'Le Baron Rouge', lat:48.8493, lon:2.3745, addr:'1 Rue Théophile Roussel' },
-  ];
-  addMarkers();
-}
-
-// ════════════════════════════════════
-// INIT CARTE
-// ════════════════════════════════════
+// ── Init carte ──
 map.on('load', () => {
   mapReady = true;
 
@@ -426,41 +304,61 @@ map.on('load', () => {
     type: 'fill-extrusion',
     minzoom: 13,
     paint: {
-      'fill-extrusion-color': ['interpolate', ['linear'], ['get', 'render_height'], 0, '#1e2530', 20, '#2a3342', 50, '#354055'],
+      'fill-extrusion-color': ['interpolate', ['linear'], ['get', 'render_height'],
+        0, '#1e2530', 20, '#2a3342', 50, '#354055'],
       'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 10],
       'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
       'fill-extrusion-opacity': 0.9,
     },
   }, labelLayerId);
 
-  // Couche zones ensoleillées
-  map.addSource('shadow-grid', {
+  // Source terrasses GeoJSON — les points sont ancrés sur la carte, pas l'écran
+  map.addSource('terraces', {
     type: 'geojson',
     data: { type: 'FeatureCollection', features: [] }
   });
+
+  // Halo extérieur (glow)
   map.addLayer({
-    id: 'sun-zones',
+    id: 'terraces-glow',
     type: 'circle',
-    source: 'shadow-grid',
+    source: 'terraces',
     paint: {
-      'circle-radius': 18,
-      'circle-color': 'rgba(245, 200, 50, 0.12)',
-      'circle-blur': 1,
+      'circle-radius': 14,
+      'circle-color': ['case', ['==', ['get', 'sunny'], 1], 'rgba(245,166,35,0.2)', 'rgba(0,0,0,0)'],
+      'circle-blur': 0.8,
     }
-  }, '3d-buildings');
+  });
+
+  // Point principal
+  map.addLayer({
+    id: 'terraces-dot',
+    type: 'circle',
+    source: 'terraces',
+    paint: {
+      'circle-radius': 7,
+      'circle-color': ['case', ['==', ['get', 'sunny'], 1], '#f5a623', '#37474f'],
+      'circle-stroke-width': 2,
+      'circle-stroke-color': ['case', ['==', ['get', 'sunny'], 1], 'rgba(255,220,100,0.7)', 'rgba(255,255,255,0.15)'],
+    }
+  });
+
+  // Clic sur une terrasse
+  map.on('click', 'terraces-dot', (e) => {
+    const props = e.features[0].properties;
+    const t = terraces.find(t => t.id == props.id);
+    if (t) showBar(t);
+  });
+
+  map.on('mouseenter', 'terraces-dot', () => { map.getCanvas().style.cursor = 'pointer'; });
+  map.on('mouseleave', 'terraces-dot', () => { map.getCanvas().style.cursor = ''; });
 
   loadTerraces();
   updateScene(currentHour);
   initMode();
-
-  // Recalcule les ombres quand on bouge la carte
-  map.on('moveend', () => updateScene(currentHour));
-  map.on('zoomend', () => updateScene(currentHour));
 });
 
-// ════════════════════════════════════
-// FICHE BAR
-// ════════════════════════════════════
+// ── Fiche bar ──
 function showBar(t) {
   document.getElementById('barName').textContent = t.name;
   document.getElementById('barAddr').textContent = t.addr;
@@ -470,7 +368,7 @@ function showBar(t) {
     st.textContent = '☀  Terrasse ensoleillée';
   } else {
     st.className = 'bar-status shade';
-    st.textContent = '  À l\'ombre en ce moment';
+    st.textContent = '🌑  À l\'ombre en ce moment';
   }
   document.getElementById('bar-panel').style.display = 'block';
   map.flyTo({ center: [t.lon, t.lat], zoom: Math.max(map.getZoom(), 17), duration: 700 });
@@ -479,9 +377,7 @@ document.getElementById('barClose').addEventListener('click', () => {
   document.getElementById('bar-panel').style.display = 'none';
 });
 
-// ════════════════════════════════════
-// CONTRÔLES TEMPS
-// ════════════════════════════════════
+// ── Contrôles temps ──
 const slider = document.getElementById('slider');
 
 function setHour(h) {
@@ -521,9 +417,7 @@ document.getElementById('btnManual').addEventListener('click', () => {
   document.getElementById('dateDisplay').textContent = 'Simulation';
 });
 
-// ════════════════════════════════════
-// LECTURE AUTO
-// ════════════════════════════════════
+// ── Lecture auto ──
 function stopPlay() {
   isPlaying = false; clearInterval(playTimer);
   document.getElementById('playBtn').textContent = '▶ Simuler la journée';
@@ -542,7 +436,6 @@ document.getElementById('playBtn').addEventListener('click', () => {
   }, 150);
 });
 
-// Refresh auto mode "maintenant"
 setInterval(() => { if (isNowMode) initMode(); }, 60000);
 </script>
 </body>
