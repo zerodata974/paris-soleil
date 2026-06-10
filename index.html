@@ -89,6 +89,8 @@ input[type=range]:disabled { opacity: 0.4; cursor: default; }
 .edit-btn.active { background: rgba(255,200,50,0.2); border-color: rgba(255,200,50,0.6); }
 .fix-btn { width: 100%; margin-top: 10px; padding: 8px; border: 0.5px solid rgba(255,200,50,0.3); border-radius: 8px; background: rgba(255,200,50,0.06); color: #f5d060; font-family: 'DM Sans', sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
 .fix-btn:hover { background: rgba(255,200,50,0.12); }
+.no-terrace-btn { width: 100%; margin-top: 6px; padding: 8px; border: 0.5px solid rgba(255,80,80,0.3); border-radius: 8px; background: rgba(255,80,80,0.06); color: #ff6b6b; font-family: 'DM Sans', sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+.no-terrace-btn:hover { background: rgba(255,80,80,0.12); }
 #edit-banner { display: none; position: absolute; top: 0; left: 0; right: 0; background: rgba(245,200,50,0.95); color: #1a0e00; font-size: 13px; font-weight: 500; padding: 10px 16px; z-index: 20; display: none; align-items: center; justify-content: space-between; }
 #edit-banner button { background: rgba(0,0,0,0.15); border: none; border-radius: 6px; padding: 4px 12px; font-size: 12px; font-weight: 600; cursor: pointer; color: #1a0e00; }
 .draggable-marker { cursor: grab !important; }
@@ -163,6 +165,7 @@ input[type=range]:disabled { opacity: 0.4; cursor: default; }
     <span id="bwText">—°C · Vent — km/h · Ressenti —°C</span>
   </div>
   <button class="fix-btn" id="fixBtn">📍 Corriger la position</button>
+  <button class="no-terrace-btn" id="noTerraceBtn">🚫 Pas de terrasse ici</button>
 </div>
 
 <div id="legend">
@@ -354,10 +357,35 @@ function getTypeLabel(tags) {
 }
 
 async function loadTerraces() {
-  const query = `[out:json][timeout:60];(
-    node["amenity"~"^(bar|cafe|pub|restaurant|biergarten)$"](48.80,2.25,48.92,2.47);
-    way["amenity"~"^(bar|cafe|pub|restaurant|biergarten)$"](48.80,2.25,48.92,2.47);
-  );out center 2000;`;
+  // ── Requête ultra-exhaustive : tous les tags liés aux terrasses extérieures ──
+  const query = `[out:json][timeout:90];(
+    node["outdoor_seating"="yes"](48.80,2.25,48.92,2.47);
+    way["outdoor_seating"="yes"](48.80,2.25,48.92,2.47);
+    node["outdoor_seating"="patio"](48.80,2.25,48.92,2.47);
+    way["outdoor_seating"="patio"](48.80,2.25,48.92,2.47);
+    node["outdoor_seating"="terrace"](48.80,2.25,48.92,2.47);
+    way["outdoor_seating"="terrace"](48.80,2.25,48.92,2.47);
+    node["outdoor_seating"="sidewalk"](48.80,2.25,48.92,2.47);
+    way["outdoor_seating"="sidewalk"](48.80,2.25,48.92,2.47);
+    node["outdoor_seating"="garden"](48.80,2.25,48.92,2.47);
+    way["outdoor_seating"="garden"](48.80,2.25,48.92,2.47);
+    node["outdoor_seating"="roof"](48.80,2.25,48.92,2.47);
+    way["outdoor_seating"="roof"](48.80,2.25,48.92,2.47);
+    node["outdoor_seating"="courtyard"](48.80,2.25,48.92,2.47);
+    way["outdoor_seating"="courtyard"](48.80,2.25,48.92,2.47);
+    node["leisure"="outdoor_seating"](48.80,2.25,48.92,2.47);
+    way["leisure"="outdoor_seating"](48.80,2.25,48.92,2.47);
+    node["amenity"="biergarten"](48.80,2.25,48.92,2.47);
+    way["amenity"="biergarten"](48.80,2.25,48.92,2.47);
+    node["amenity"="bar"]["terrace"="yes"](48.80,2.25,48.92,2.47);
+    way["amenity"="bar"]["terrace"="yes"](48.80,2.25,48.92,2.47);
+    node["amenity"="cafe"]["terrace"="yes"](48.80,2.25,48.92,2.47);
+    way["amenity"="cafe"]["terrace"="yes"](48.80,2.25,48.92,2.47);
+    node["amenity"="restaurant"]["terrace"="yes"](48.80,2.25,48.92,2.47);
+    way["amenity"="restaurant"]["terrace"="yes"](48.80,2.25,48.92,2.47);
+    node["amenity"~"^(bar|cafe|pub|restaurant|biergarten)$"]["outdoor_seating"!="no"](48.75,2.20,48.95,2.52);
+    way["amenity"~"^(bar|cafe|pub|restaurant|biergarten)$"]["outdoor_seating"!="no"](48.75,2.20,48.95,2.52);
+  );out center 3000;`;
 
   const servers = [
     'https://overpass-api.de/api/interpreter',
@@ -365,27 +393,53 @@ async function loadTerraces() {
     'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
   ];
 
+  // Charge les exclusions (lieux marqués "sans terrasse")
+  const excluded = loadExcluded();
+  // Charge les corrections de position
+  const corrections = loadCorrections();
+
   for (const server of servers) {
     try {
       console.log(`Tentative sur ${server}...`);
       const res = await fetch(server, {
         method: 'POST',
         body: 'data=' + encodeURIComponent(query),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(25000),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+
+      // Dédoublonnage par nom + position approximative
+      const seen = new Set();
       terraces = data.elements
-        .filter(el => (el.lat || el.center?.lat) && el.tags?.name)
-        .map(el => ({
-          id: el.id,
-          name: el.tags.name,
-          lat: el.lat ?? el.center.lat,
-          lon: el.lon ?? el.center.lon,
-          addr: [el.tags?.['addr:housenumber'], el.tags?.['addr:street']].filter(Boolean).join(' ') || 'Paris',
-          price: getPriceLabel(el.tags),
-          type: getTypeLabel(el.tags),
-        }));
+        .filter(el => {
+          const lat = el.lat ?? el.center?.lat;
+          const lon = el.lon ?? el.center?.lon;
+          if (!lat || !lon || !el.tags?.name) return false;
+          if (excluded[el.id]) return false; // Exclu manuellement
+          const key = `${el.tags.name}_${Math.round(lat*1000)}_${Math.round(lon*1000)}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .map(el => {
+          const baseLat = el.lat ?? el.center.lat;
+          const baseLon = el.lon ?? el.center.lon;
+          // Applique correction si elle existe
+          const corrected = corrections[el.id];
+          return {
+            id: el.id,
+            name: el.tags.name,
+            lat: corrected ? corrected.lat : baseLat,
+            lon: corrected ? corrected.lon : baseLon,
+            addr: [el.tags?.['addr:housenumber'], el.tags?.['addr:street']].filter(Boolean).join(' ') || 'Paris',
+            price: getPriceLabel(el.tags),
+            type: getTypeLabel(el.tags),
+            hasTerrace: el.tags?.outdoor_seating && el.tags.outdoor_seating !== 'no',
+            corrected: !!corrected,
+          };
+        });
+
       console.log(`✅ ${terraces.length} établissements chargés depuis ${server}`);
       break;
     } catch(e) {
@@ -399,6 +453,24 @@ async function loadTerraces() {
   }
 
   updateTerraceLayer(getSun(currentHour));
+}
+
+// ── Gestion des exclusions (lieux sans terrasse) ──
+function loadExcluded() {
+  try { return JSON.parse(localStorage.getItem('terraceExcluded') || '{}'); }
+  catch(e) { return {}; }
+}
+
+function saveExclusion(id) {
+  const excluded = loadExcluded();
+  excluded[id] = true;
+  localStorage.setItem('terraceExcluded', JSON.stringify(excluded));
+}
+
+function removeExclusion(id) {
+  const excluded = loadExcluded();
+  delete excluded[id];
+  localStorage.setItem('terraceExcluded', JSON.stringify(excluded));
 }
 
 function useDemoData() {
@@ -635,6 +707,18 @@ document.getElementById('editClose').addEventListener('click', () => {
 });
 
 // Bouton corriger dans la fiche
+// Bouton "Pas de terrasse"
+document.getElementById('noTerraceBtn').addEventListener('click', () => {
+  if (!selectedForFix) return;
+  const t = selectedForFix;
+  saveExclusion(t.id);
+  // Retire de la liste
+  terraces = terraces.filter(x => x.id !== t.id);
+  updateTerraceLayer(getSun(currentHour));
+  document.getElementById('bar-panel').style.display = 'none';
+  showToast(`🚫 ${t.name} retiré de la carte`);
+});
+
 document.getElementById('fixBtn').addEventListener('click', () => {
   if (!selectedForFix) return;
   const t = selectedForFix;
