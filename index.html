@@ -91,6 +91,14 @@ input[type=range]:disabled { opacity: 0.4; cursor: default; }
 .fix-btn:hover { background: rgba(255,200,50,0.12); }
 .no-terrace-btn { width: 100%; margin-top: 6px; padding: 8px; border: 0.5px solid rgba(255,80,80,0.3); border-radius: 8px; background: rgba(255,80,80,0.06); color: #ff6b6b; font-family: 'DM Sans', sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
 .no-terrace-btn:hover { background: rgba(255,80,80,0.12); }
+.bar-link { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 500; text-decoration: none; border: 0.5px solid var(--ui-border); background: rgba(255,255,255,0.04); color: var(--ui-text); cursor: pointer; transition: all 0.15s; }
+.bar-link:hover { background: rgba(255,255,255,0.08); }
+.bar-link.web { border-color: rgba(100,180,255,0.3); color: #64b4ff; }
+.bar-link.phone { border-color: rgba(100,255,150,0.3); color: #64ff96; }
+.bar-link.instagram { border-color: rgba(255,100,150,0.3); color: #ff6496; }
+.bar-link.facebook { border-color: rgba(100,150,255,0.3); color: #6496ff; }
+.bar-link.hours-open { border-color: rgba(100,255,150,0.3); color: #64ff96; }
+.bar-link.hours-closed { border-color: rgba(255,100,100,0.3); color: #ff6464; }
 #edit-banner { display: none; position: absolute; top: 0; left: 0; right: 0; background: rgba(245,200,50,0.95); color: #1a0e00; font-size: 13px; font-weight: 500; padding: 10px 16px; z-index: 20; display: none; align-items: center; justify-content: space-between; }
 #edit-banner button { background: rgba(0,0,0,0.15); border: none; border-radius: 6px; padding: 4px 12px; font-size: 12px; font-weight: 600; cursor: pointer; color: #1a0e00; }
 .draggable-marker { cursor: grab !important; }
@@ -164,6 +172,17 @@ input[type=range]:disabled { opacity: 0.4; cursor: default; }
     <span id="bwIcon">🌡️</span>
     <span id="bwText">—°C · Vent — km/h · Ressenti —°C</span>
   </div>
+  <!-- Photo -->
+  <div id="barPhoto" style="display:none; margin-bottom:10px; border-radius:8px; overflow:hidden; height:140px;">
+    <img id="barPhotoImg" style="width:100%; height:100%; object-fit:cover;" src="" alt="">
+  </div>
+
+  <!-- Infos contact -->
+  <div id="barLinks" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;"></div>
+
+  <!-- Horaires -->
+  <div id="barHours" style="display:none; font-size:11px; color:var(--ui-muted); padding:6px 10px; background:rgba(255,255,255,0.03); border-radius:8px; border:0.5px solid var(--ui-border); margin-bottom:10px;"></div>
+
   <button class="fix-btn" id="fixBtn">📍 Corriger la position</button>
   <button class="no-terrace-btn" id="noTerraceBtn">🚫 Pas de terrasse ici</button>
 </div>
@@ -427,16 +446,25 @@ async function loadTerraces() {
           const baseLon = el.lon ?? el.center.lon;
           // Applique correction si elle existe
           const corrected = corrections[el.id];
+          const t = el.tags;
           return {
             id: el.id,
-            name: el.tags.name,
+            name: t.name,
             lat: corrected ? corrected.lat : baseLat,
             lon: corrected ? corrected.lon : baseLon,
-            addr: [el.tags?.['addr:housenumber'], el.tags?.['addr:street']].filter(Boolean).join(' ') || 'Paris',
-            price: getPriceLabel(el.tags),
-            type: getTypeLabel(el.tags),
-            hasTerrace: el.tags?.outdoor_seating && el.tags.outdoor_seating !== 'no',
+            addr: [t?.['addr:housenumber'], t?.['addr:street']].filter(Boolean).join(' ') || 'Paris',
+            price: getPriceLabel(t),
+            type: getTypeLabel(t),
+            hasTerrace: t?.outdoor_seating && t.outdoor_seating !== 'no',
             corrected: !!corrected,
+            // Contact
+            website: t?.website || t?.['contact:website'] || null,
+            phone: t?.phone || t?.['contact:phone'] || null,
+            instagram: t?.['contact:instagram'] || t?.['social:instagram'] || null,
+            facebook: t?.['contact:facebook'] || t?.['social:facebook'] || null,
+            hours: t?.opening_hours || null,
+            wikimedia: t?.['wikimedia_commons'] || null,
+            image: t?.image || null,
           };
         });
 
@@ -496,11 +524,44 @@ function useDemoData() {
 map.on('load', () => {
   mapReady = true;
 
-  // Config style Standard : thème sombre + ombres activées
+  // Config style Standard : thème sombre + POI filtrés
   try {
     map.setConfigProperty('basemap', 'lightPreset', 'night');
+    // Masque tous les POI sauf ce qu'on veut garder
     map.setConfigProperty('basemap', 'showPointOfInterestLabels', false);
+    map.setConfigProperty('basemap', 'showTransitLabels', false);
+    map.setConfigProperty('basemap', 'showPlaceLabels', true);
+    map.setConfigProperty('basemap', 'showRoadLabels', true);
   } catch(e) {}
+
+  // Masque les couches indésirables après chargement du style
+  map.on('style.load', () => {
+    const layersToHide = [
+      'poi-label',
+      'transit-label', 
+      'airport-label',
+      'settlement-minor-label',
+      'cycling-network-line',
+      'cycling-network-label',
+      'path',
+      'pedestrian-path',
+    ];
+    layersToHide.forEach(id => {
+      try { map.setLayoutProperty(id, 'visibility', 'none'); } catch(e) {}
+    });
+
+    // Garde uniquement les stations Vélib' et métro visibles
+    try {
+      map.setFilter('poi-label', [
+        'any',
+        ['==', ['get', 'maki'], 'bicycle-share'],
+        ['==', ['get', 'maki'], 'rail-metro'],
+        ['==', ['get', 'maki'], 'rail'],
+        ['==', ['get', 'class'], 'transit'],
+      ]);
+      map.setLayoutProperty('poi-label', 'visibility', 'visible');
+    } catch(e) {}
+  });
 
   map.addLayer({
     id: '3d-buildings',
@@ -567,7 +628,7 @@ map.on('load', () => {
 // ════════════════════════════════════
 // FICHE BAR
 // ════════════════════════════════════
-function showBar(t) {
+async function showBar(t) {
   document.getElementById('barName').textContent = t.name;
   document.getElementById('barAddr').textContent = t.addr;
   document.getElementById('barPrice').textContent = t.price;
@@ -579,10 +640,70 @@ function showBar(t) {
     document.getElementById('bwIcon').textContent = getWeatherIcon(weatherData.code);
     document.getElementById('bwText').textContent = `${weatherData.temp}°C · 💨 ${weatherData.wind} km/h · Ressenti ${weatherData.feel}°C`;
   }
+
+  // Liens contact
+  const linksEl = document.getElementById('barLinks');
+  linksEl.innerHTML = '';
+  if (t.website) {
+    const a = document.createElement('a');
+    a.href = t.website.startsWith('http') ? t.website : 'https://' + t.website;
+    a.target = '_blank'; a.rel = 'noopener';
+    a.className = 'bar-link web'; a.textContent = '🌐 Site web';
+    linksEl.appendChild(a);
+  }
+  if (t.phone) {
+    const a = document.createElement('a');
+    a.href = 'tel:' + t.phone;
+    a.className = 'bar-link phone'; a.textContent = '📞 ' + t.phone;
+    linksEl.appendChild(a);
+  }
+  if (t.instagram) {
+    const a = document.createElement('a');
+    a.href = t.instagram.startsWith('http') ? t.instagram : 'https://instagram.com/' + t.instagram;
+    a.target = '_blank'; a.rel = 'noopener';
+    a.className = 'bar-link instagram'; a.textContent = '📸 Instagram';
+    linksEl.appendChild(a);
+  }
+  if (t.facebook) {
+    const a = document.createElement('a');
+    a.href = t.facebook.startsWith('http') ? t.facebook : 'https://facebook.com/' + t.facebook;
+    a.target = '_blank'; a.rel = 'noopener';
+    a.className = 'bar-link facebook'; a.textContent = '👤 Facebook';
+    linksEl.appendChild(a);
+  }
+
+  // Horaires
+  const hoursEl = document.getElementById('barHours');
+  if (t.hours) {
+    hoursEl.style.display = 'block';
+    hoursEl.textContent = '🕐 ' + t.hours;
+  } else {
+    hoursEl.style.display = 'none';
+  }
+
+  // Photo
+  const photoEl = document.getElementById('barPhoto');
+  const photoImg = document.getElementById('barPhotoImg');
+  photoEl.style.display = 'none';
+  if (t.image) {
+    photoImg.src = t.image;
+    photoEl.style.display = 'block';
+  } else if (t.wikimedia) {
+    try {
+      const file = t.wikimedia.replace('File:', '').replace('Category:', '');
+      const res = await fetch('https://en.wikipedia.org/w/api.php?action=query&titles=File:' + encodeURIComponent(file) + '&prop=imageinfo&iiprop=url&format=json&origin=*');
+      const data = await res.json();
+      const page = Object.values(data.query.pages)[0];
+      if (page && page.imageinfo && page.imageinfo[0]) {
+        photoImg.src = page.imageinfo[0].url;
+        photoEl.style.display = 'block';
+      }
+    } catch(e) {}
+  }
+
   document.getElementById('bar-panel').style.display = 'block';
   map.flyTo({ center: [t.lon, t.lat], zoom: Math.max(map.getZoom(), 17), duration: 700 });
 }
-
 document.getElementById('barClose').addEventListener('click', () => {
   document.getElementById('bar-panel').style.display = 'none';
 });
